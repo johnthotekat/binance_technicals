@@ -7,6 +7,34 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+
+  <!-- Info Popup -->
+  <div id="infoPopup" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg p-6 w-11/12 max-w-lg">
+      <h2 class="text-2xl font-bold text-gray-800 mb-4">Welcome to Crypto Analysis</h2>
+      <p class="text-gray-700 mb-4">
+        This tool allows you to analyze cryptocurrency trading pairs using various metrics like RSI, Moving Averages, and trend crossovers.
+        You can filter and sort data, and switch intervals to customize your analysis.
+      </p>
+      <p class="text-gray-700 mb-4">
+        - <strong>RSI:</strong> Indicates overbought or oversold conditions. <br>
+        - <strong>Moving Averages:</strong> Shows trends over different timeframes. <br>
+        - <strong>Cross Status:</strong> Identifies bullish or bearish crossovers.
+      </p>
+      <button onclick="closeInfoPopup()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Got It</button>
+    </div>
+  </div>
+
+  <!-- Help Button -->
+  <button
+    onclick="showInfoPopup()"
+    class="fixed bottom-6 right-6 bg-blue-500 text-white rounded-full p-4 shadow-lg hover:bg-blue-600"
+    title="Help"
+  >
+    ?
+  </button>
+
+  <!-- Main Content -->
   <h1 class="text-3xl font-bold text-gray-800 mb-6">Crypto Analysis</h1>
 
   <div class="flex flex-wrap gap-4 w-full max-w-6xl mb-6">
@@ -30,7 +58,7 @@
     </div>
   </div>
 
-  <div class="overflow-x-auto w-full max-w-6xl">
+  <div class="overflow-x-auto w-full">
     <table id="cryptoTable" class="table-auto w-full border-collapse bg-white shadow-md rounded">
       <thead>
         <tr class="bg-gray-200">
@@ -43,6 +71,10 @@
           <th onclick="sortTable(6)" class="p-2 cursor-pointer">MA 200</th>
           <th onclick="sortTable(7)" class="p-2 cursor-pointer">Current Price</th>
           <th onclick="sortTable(8)" class="p-2 cursor-pointer">Cross Status</th>
+          <th onclick="sortTable(9)" class="p-2 cursor-pointer">Bollinger Upper</th>
+          <th onclick="sortTable(10)" class="p-2 cursor-pointer">Bollinger Middle</th>
+          <th onclick="sortTable(11)" class="p-2 cursor-pointer">Bollinger Lower</th>
+          <th onclick="sortTable(12)" class="p-2 cursor-pointer">Verdict</th>
         </tr>
       </thead>
       <tbody>
@@ -51,9 +83,82 @@
     </table>
   </div>
 
+  <!-- Footer -->
+  <footer class="mt-6 text-gray-600">
+    Made with ❤️ - John
+  </footer>
+
   <script>
     const API_URL = 'https://api.binance.com/api/v3';
     let sortOrder = {}; // Store current sort order for each column
+    const tradingViewBaseURL = "https://www.tradingview.com/chart/?symbol=BINANCE:";
+
+
+
+    function sortTable(columnIndex) {
+      const table = document.getElementById('cryptoTable');
+      const rows = Array.from(table.tBodies[0].rows); // Get table rows
+      const isAscending = sortOrder[columnIndex] !== 'asc'; // Determine the sort order
+
+      // Sort rows
+      rows.sort((rowA, rowB) => {
+        const cellA = rowA.cells[columnIndex].innerText;
+        const cellB = rowB.cells[columnIndex].innerText;
+
+        // Compare numbers if possible, otherwise compare as strings
+        const comparison = isNaN(cellA - cellB)
+          ? cellA.localeCompare(cellB)
+          : parseFloat(cellA) - parseFloat(cellB);
+
+        return isAscending ? comparison : -comparison;
+      });
+
+      // Update the sort order
+      sortOrder[columnIndex] = isAscending ? 'asc' : 'desc';
+
+      // Append sorted rows back to the table
+      table.tBodies[0].append(...rows);
+    }
+
+    // Show the info popup
+    function showInfoPopup() {
+      document.getElementById('infoPopup').classList.remove('hidden');
+    }
+
+    // Close the info popup
+    function closeInfoPopup() {
+      document.getElementById('infoPopup').classList.add('hidden');
+    }
+
+    function calculateVolumeAnalytics(volumes, period = 20) {
+        if (volumes.length < period) return { avgVolume: null, isHighVolume: false };
+
+        const slicedVolumes = volumes.slice(-period);
+        const avgVolume = slicedVolumes.reduce((sum, vol) => sum + vol, 0) / period;
+        const currentVolume = volumes[volumes.length - 1];
+        const isHighVolume = currentVolume > avgVolume * 1.5; // Threshold for high volume
+
+        return { avgVolume, currentVolume, isHighVolume };
+      }
+
+
+    function calculateBollingerBands(closes, period = 20, multiplier = 2) {
+      if (closes.length < period) return { upper: null, lower: null, middle: null };
+
+      const slicedCloses = closes.slice(-period); // Last `period` closing prices
+      const middle = slicedCloses.reduce((sum, price) => sum + price, 0) / period; // SMA for the period
+      const variance = slicedCloses.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+      const stdDev = Math.sqrt(variance);
+
+      const upper = middle + multiplier * stdDev;
+      const lower = middle - multiplier * stdDev;
+
+      return { upper, lower, middle };
+    }
+
+
+    // Display info popup on page load
+    window.onload = () => showInfoPopup();
 
     async function fetchTradingPairs() {
       const response = await fetch(`${API_URL}/exchangeInfo`);
@@ -87,7 +192,7 @@
 
     function calculateCrossStatus(ma7, ma50, prevMa7, prevMa50) {
       if (prevMa7 < prevMa50 && ma7 > ma50) return 'Golden Cross';
-      if (prevMa7 > prevMa50 && ma7 < ma50) return 'Death Cross';
+      if (prevMa7 > ma50 && ma7 < ma50) return 'Death Cross';
       return 'No Cross';
     }
 
@@ -107,20 +212,63 @@
           const prevMa7 = calculateMovingAverage(closes.slice(0, -1), 7);
           const prevMa50 = calculateMovingAverage(closes.slice(0, -1), 50);
           const crossStatus = calculateCrossStatus(ma7, ma50, prevMa7, prevMa50);
-          const rsiStatus = rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral';
-          const currentPrice = closes[closes.length - 1];
 
+
+
+          // Bollinger Bands
+          const { upper, lower, middle } = calculateBollingerBands(closes, 20);
+
+          const currentPrice = closes[closes.length - 1];
+          const rsiStatus = rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral';
+                    // Verdict Logic
+          let verdict = 'HOLD';
+          if (rsi < 30 || currentPrice <= lower) {
+            verdict = 'BUY';
+          } else if (rsi > 70 || currentPrice >= upper) {
+            verdict = 'SELL';
+          }
+
+          // Apply color-coding
+          const rsiClass = rsi > 70
+            ? 'bg-red-200' // Overbought
+            : rsi < 30
+            ? 'bg-green-200' // Oversold
+            : '';
+          const priceClass = currentPrice <= lower
+            ? 'bg-blue-200' // Price near lower Bollinger Band
+            : currentPrice >= upper
+            ? 'bg-orange-200' // Price near upper Bollinger Band
+            : '';
+          const tradingViewSymbol = pair.replace("USDT", "USDT");
           const row = `
             <tr class="hover:bg-gray-100">
-              <td class="p-2">${pair}</td>
-              <td class="p-2">${rsi.toFixed(2)}</td>
+              <td class="p-2">
+                <a href="${tradingViewBaseURL}${pair}"
+                   target="_blank"
+                   class="text-blue-500 hover:underline">
+                  ${pair}
+                </a>
+              </td>
+              <td class="p-2 ${rsiClass}">${rsi.toFixed(5)}</td>
               <td class="p-2">${rsiStatus}</td>
-              <td class="p-2">${ma7?.toFixed(2) || '-'}</td>
-              <td class="p-2">${ma20?.toFixed(2) || '-'}</td>
-              <td class="p-2">${ma50?.toFixed(2) || '-'}</td>
-              <td class="p-2">${ma200?.toFixed(2) || '-'}</td>
-              <td class="p-2">${currentPrice.toFixed(2)}</td>
+              <td class="p-2">${ma7?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma20?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma50?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma200?.toFixed(5) || '-'}</td>
+              <td class="p-2 ${priceClass}">${currentPrice.toFixed(5)}</td>
               <td class="p-2">${crossStatus}</td>
+              <td class="p-2">${upper?.toFixed(5) || '-'}</td>
+              <td class="p-2">${middle?.toFixed(5) || '-'}</td>
+              <td class="p-2">${lower?.toFixed(5) || '-'}</td>
+              <td class="p-2 font-bold ${
+                verdict === 'BUY'
+                  ? 'text-green-600'
+                  : verdict === 'SELL'
+                  ? 'text-red-600'
+                  : 'text-gray-600'
+              }">
+                ${verdict}
+              </td>
             </tr>
           `;
           tableBody.innerHTML += row;
@@ -130,25 +278,6 @@
       }
     }
 
-    function sortTable(columnIndex) {
-      const table = document.getElementById('cryptoTable');
-      const rows = Array.from(table.rows).slice(1); // Exclude header row
-      const isAscending = sortOrder[columnIndex] !== 'asc'; // Toggle sort order
-
-      const sortedRows = rows.sort((a, b) => {
-        const valA = a.cells[columnIndex].innerText;
-        const valB = b.cells[columnIndex].innerText;
-
-        const comparison = isNaN(valA - valB)
-          ? valA.localeCompare(valB)
-          : parseFloat(valA) - parseFloat(valB);
-
-        return isAscending ? comparison : -comparison;
-      });
-
-      sortOrder[columnIndex] = isAscending ? 'asc' : 'desc'; // Update sort order
-      table.tBodies[0].append(...sortedRows); // Append sorted rows
-    }
 
     document.getElementById('filterInput').addEventListener('input', function () {
       const filter = this.value.toUpperCase();
@@ -164,7 +293,6 @@
       populateTable(interval);
     });
 
-    // Initial population with default interval
     populateTable('1h');
   </script>
 </body>
