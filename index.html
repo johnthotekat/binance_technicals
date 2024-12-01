@@ -74,7 +74,9 @@
           <th onclick="sortTable(9)" class="p-2 cursor-pointer">Bollinger Upper</th>
           <th onclick="sortTable(10)" class="p-2 cursor-pointer">Bollinger Middle</th>
           <th onclick="sortTable(11)" class="p-2 cursor-pointer">Bollinger Lower</th>
-          <th onclick="sortTable(12)" class="p-2 cursor-pointer">Verdict</th>
+          <th onclick="sortTable(12)" class="p-2 cursor-pointer">Potential (%)</th>
+          <th onclick="sortTable(13)" class="p-2 cursor-pointer">Verdict</th>
+
         </tr>
       </thead>
       <tbody>
@@ -196,6 +198,29 @@
       return 'No Cross';
     }
 
+    function calculatePotential(currentPrice, lowerBand, upperBand, rsi) {
+      // Avoid division by zero if Bollinger Band data is unavailable
+      if (!upperBand || !lowerBand || upperBand === lowerBand) {
+        return null;
+      }
+
+      // Bollinger Band potential as percentage
+      const bandPotential = ((currentPrice - lowerBand) / (upperBand - lowerBand)) * 100;
+
+      // Adjust with RSI: Higher RSI reduces potential, lower RSI increases potential
+      let rsiAdjustment = 0;
+      if (rsi < 30) {
+        rsiAdjustment = 10; // Add 10% potential for oversold
+      } else if (rsi > 70) {
+        rsiAdjustment = -10; // Subtract 10% potential for overbought
+      }
+
+      // Final potential calculation
+      const finalPotential = Math.min(100, Math.max(0, bandPotential + rsiAdjustment));
+      return finalPotential.toFixed(2); // Keep two decimal places
+    }
+
+
     async function populateTable(interval) {
       const tableBody = document.querySelector('#cryptoTable tbody');
       tableBody.innerHTML = ''; // Clear the table before updating
@@ -220,6 +245,9 @@
 
           const currentPrice = closes[closes.length - 1];
           const rsiStatus = rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral';
+
+          const potential = calculatePotential(currentPrice, lower, upper, rsi);
+
                     // Verdict Logic
           let verdict = 'HOLD';
           if (rsi < 30 || currentPrice <= lower) {
@@ -260,6 +288,7 @@
               <td class="p-2">${upper?.toFixed(5) || '-'}</td>
               <td class="p-2">${middle?.toFixed(5) || '-'}</td>
               <td class="p-2">${lower?.toFixed(5) || '-'}</td>
+              <td class="p-2">${potential || '-'}</td>
               <td class="p-2 font-bold ${
                 verdict === 'BUY'
                   ? 'text-green-600'
