@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Analysis Table</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+  <h1 class="text-3xl font-bold text-gray-800 mb-6">Crypto Analysis</h1>
+
+  <div class="flex flex-wrap gap-4 w-full max-w-6xl mb-6">
+    <input
+      type="text"
+      id="filterInput"
+      placeholder="Filter by Pair Name..."
+      class="border border-gray-300 p-2 rounded w-full sm:w-1/2"
+    >
+    <div class="w-full sm:w-1/4">
+      <label for="intervalSelector" class="block mb-1 text-gray-600">Select Interval:</label>
+      <select
+        id="intervalSelector"
+        class="border border-gray-300 p-2 rounded w-full"
+      >
+        <option value="1h">1 Hour</option>
+        <option value="4h">4 Hours</option>
+        <option value="1d">1 Day</option>
+        <option value="1w">1 Week</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto w-full max-w-6xl">
+    <table id="cryptoTable" class="table-auto w-full border-collapse bg-white shadow-md rounded">
+      <thead>
+        <tr class="bg-gray-200">
+          <th onclick="sortTable(0)" class="p-2 cursor-pointer">PAIRNAME</th>
+          <th onclick="sortTable(1)" class="p-2 cursor-pointer">RSI</th>
+          <th onclick="sortTable(2)" class="p-2 cursor-pointer">RSI Status</th>
+          <th onclick="sortTable(3)" class="p-2 cursor-pointer">MA 7</th>
+          <th onclick="sortTable(4)" class="p-2 cursor-pointer">MA 20</th>
+          <th onclick="sortTable(5)" class="p-2 cursor-pointer">MA 50</th>
+          <th onclick="sortTable(6)" class="p-2 cursor-pointer">MA 200</th>
+          <th onclick="sortTable(7)" class="p-2 cursor-pointer">Current Price</th>
+          <th onclick="sortTable(8)" class="p-2 cursor-pointer">Cross Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Data will be populated here -->
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const API_URL = 'https://api.binance.com/api/v3';
+    let sortOrder = {}; // Store current sort order for each column
+
+    async function fetchTradingPairs() {
+      const response = await fetch(`${API_URL}/exchangeInfo`);
+      const data = await response.json();
+      return data.symbols.filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT').map(s => s.symbol);
+    }
+
+    async function fetchKlines(symbol, interval = '1h', limit = 200) {
+      const response = await fetch(`${API_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+      const data = await response.json();
+      return data.map(kline => parseFloat(kline[4])); // Close prices
+    }
+
+    function calculateRSI(closes, period = 14) {
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= period; i++) {
+        const diff = closes[i] - closes[i - 1];
+        if (diff >= 0) gains += diff;
+        else losses -= diff;
+      }
+      const avgGain = gains / period;
+      const avgLoss = losses / period;
+      const rs = avgGain / avgLoss || 0;
+      return 100 - (100 / (1 + rs));
+    }
+
+    function calculateMovingAverage(closes, period) {
+      if (closes.length < period) return null;
+      return closes.slice(-period).reduce((sum, price) => sum + price, 0) / period;
+    }
+
+    function calculateCrossStatus(ma7, ma50, prevMa7, prevMa50) {
+      if (prevMa7 < prevMa50 && ma7 > ma50) return 'Golden Cross';
+      if (prevMa7 > prevMa50 && ma7 < ma50) return 'Death Cross';
+      return 'No Cross';
+    }
+
+    async function populateTable(interval) {
+      const tableBody = document.querySelector('#cryptoTable tbody');
+      tableBody.innerHTML = ''; // Clear the table before updating
+      const tradingPairs = await fetchTradingPairs();
+
+      for (const pair of tradingPairs) {
+        try {
+          const closes = await fetchKlines(pair, interval);
+          const rsi = calculateRSI(closes);
+          const ma7 = calculateMovingAverage(closes, 7);
+          const ma20 = calculateMovingAverage(closes, 20);
+          const ma50 = calculateMovingAverage(closes, 50);
+          const ma200 = calculateMovingAverage(closes, 200);
+          const prevMa7 = calculateMovingAverage(closes.slice(0, -1), 7);
+          const prevMa50 = calculateMovingAverage(closes.slice(0, -1), 50);
+          const crossStatus = calculateCrossStatus(ma7, ma50, prevMa7, prevMa50);
+          const rsiStatus = rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral';
+          const currentPrice = closes[closes.length - 1];
+
+          const row = `
+            <tr class="hover:bg-gray-100">
+              <td class="p-2">${pair}</td>
+              <td class="p-2">${rsi.toFixed(2)}</td>
+              <td class="p-2">${rsiStatus}</td>
+              <td class="p-2">${ma7?.toFixed(2) || '-'}</td>
+              <td class="p-2">${ma20?.toFixed(2) || '-'}</td>
+              <td class="p-2">${ma50?.toFixed(2) || '-'}</td>
+              <td class="p-2">${ma200?.toFixed(2) || '-'}</td>
+              <td class="p-2">${currentPrice.toFixed(2)}</td>
+              <td class="p-2">${crossStatus}</td>
+            </tr>
+          `;
+          tableBody.innerHTML += row;
+        } catch (error) {
+          console.error(`Error fetching data for ${pair}:`, error);
+        }
+      }
+    }
+
+    function sortTable(columnIndex) {
+      const table = document.getElementById('cryptoTable');
+      const rows = Array.from(table.rows).slice(1); // Exclude header row
+      const isAscending = sortOrder[columnIndex] !== 'asc'; // Toggle sort order
+
+      const sortedRows = rows.sort((a, b) => {
+        const valA = a.cells[columnIndex].innerText;
+        const valB = b.cells[columnIndex].innerText;
+
+        const comparison = isNaN(valA - valB)
+          ? valA.localeCompare(valB)
+          : parseFloat(valA) - parseFloat(valB);
+
+        return isAscending ? comparison : -comparison;
+      });
+
+      sortOrder[columnIndex] = isAscending ? 'asc' : 'desc'; // Update sort order
+      table.tBodies[0].append(...sortedRows); // Append sorted rows
+    }
+
+    document.getElementById('filterInput').addEventListener('input', function () {
+      const filter = this.value.toUpperCase();
+      const rows = document.querySelectorAll('#cryptoTable tbody tr');
+      rows.forEach(row => {
+        const cellText = row.cells[0].innerText.toUpperCase();
+        row.style.display = cellText.includes(filter) ? '' : 'none';
+      });
+    });
+
+    document.getElementById('intervalSelector').addEventListener('change', function () {
+      const interval = this.value;
+      populateTable(interval);
+    });
+
+    // Initial population with default interval
+    populateTable('1h');
+  </script>
+</body>
+</html>
