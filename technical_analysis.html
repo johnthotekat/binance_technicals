@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Analysis Table</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+  <!-- Info Popup -->
+  <div id="infoPopup" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg shadow-lg p-6 w-11/12 max-w-lg">
+      <h2 class="text-2xl font-bold text-gray-800 mb-4">Welcome to Crypto Analysis</h2>
+      <p class="text-gray-700 mb-4">
+        This tool allows you to analyze cryptocurrency trading pairs using various metrics like RSI, Moving Averages, trend crossovers, and candlestick patterns.
+      </p>
+      <p class="text-gray-700 mb-4">
+        - <strong>RSI:</strong> Indicates overbought or oversold conditions. <br>
+        - <strong>Moving Averages:</strong> Shows trends over different timeframes. <br>
+        - <strong>Cross Status:</strong> Identifies bullish or bearish crossovers. <br>
+        - <strong>Patterns:</strong> Detects common candlestick patterns.
+      </p>
+      <button onclick="closeInfoPopup()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Got It</button>
+    </div>
+  </div>
+
+  <!-- Help Button -->
+  <button
+    onclick="showInfoPopup()"
+    class="fixed bottom-6 right-6 bg-blue-500 text-white rounded-full p-4 shadow-lg hover:bg-blue-600"
+    title="Help"
+  >
+    ?
+  </button>
+
+  <!-- Main Content -->
+  <h1 class="text-3xl font-bold text-gray-800 mb-6">Crypto Analysis</h1>
+
+  <div class="flex flex-wrap gap-4 w-full max-w-6xl mb-6">
+    <input
+      type="text"
+      id="filterInput"
+      placeholder="Filter by Pair Name..."
+      class="border border-gray-300 p-2 rounded w-full sm:w-1/2"
+    >
+    <div class="w-full sm:w-1/4">
+      <label for="intervalSelector" class="block mb-1 text-gray-600">Select Interval:</label>
+      <select
+        id="intervalSelector"
+        class="border border-gray-300 p-2 rounded w-full"
+      >
+        <option value="1h">1 Hour</option>
+        <option value="4h">4 Hours</option>
+        <option value="1d">1 Day</option>
+        <option value="1w">1 Week</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto w-full">
+    <table id="cryptoTable" class="table-auto w-full border-collapse bg-white shadow-md rounded">
+      <thead>
+        <tr class="bg-gray-200">
+          <th onclick="sortTable(0)" class="p-2 cursor-pointer">PAIRNAME</th>
+          <th onclick="sortTable(1)" class="p-2 cursor-pointer">RSI</th>
+          <th onclick="sortTable(2)" class="p-2 cursor-pointer">RSI Status</th>
+          <th onclick="sortTable(3)" class="p-2 cursor-pointer">MA 7</th>
+          <th onclick="sortTable(4)" class="p-2 cursor-pointer">MA 20</th>
+          <th onclick="sortTable(5)" class="p-2 cursor-pointer">MA 50</th>
+          <th onclick="sortTable(6)" class="p-2 cursor-pointer">MA 200</th>
+          <th onclick="sortTable(7)" class="p-2 cursor-pointer">Current Price</th>
+          <th onclick="sortTable(8)" class="p-2 cursor-pointer">Cross Status</th>
+          <th onclick="sortTable(9)" class="p-2 cursor-pointer">Pattern</th>
+          <th onclick="sortTable(10)" class="p-2 cursor-pointer">Bollinger Upper</th>
+          <th onclick="sortTable(11)" class="p-2 cursor-pointer">Bollinger Middle</th>
+          <th onclick="sortTable(12)" class="p-2 cursor-pointer">Bollinger Lower</th>
+          <th onclick="sortTable(13)" class="p-2 cursor-pointer">Potential (%)</th>
+          <th onclick="sortTable(14)" class="p-2 cursor-pointer">Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Data will be populated here -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Footer -->
+  <footer class="mt-6 text-gray-600">
+    Made with ❤️ - John
+  </footer>
+
+  <script>
+    const API_URL = 'https://api.binance.com/api/v3';
+    let sortOrder = {};
+    const tradingViewBaseURL = "https://www.tradingview.com/chart/?symbol=BINANCE:";
+
+    function sortTable(columnIndex) {
+      const table = document.getElementById('cryptoTable');
+      const rows = Array.from(table.tBodies[0].rows);
+      const isAscending = sortOrder[columnIndex] !== 'asc';
+
+      rows.sort((rowA, rowB) => {
+        const cellA = rowA.cells[columnIndex].innerText;
+        const cellB = rowB.cells[columnIndex].innerText;
+        const comparison = isNaN(cellA - cellB)
+          ? cellA.localeCompare(cellB)
+          : parseFloat(cellA) - parseFloat(cellB);
+        return isAscending ? comparison : -comparison;
+      });
+
+      sortOrder[columnIndex] = isAscending ? 'asc' : 'desc';
+      table.tBodies[0].append(...rows);
+    }
+
+    function showInfoPopup() {
+      document.getElementById('infoPopup').classList.remove('hidden');
+    }
+
+    function closeInfoPopup() {
+      document.getElementById('infoPopup').classList.add('hidden');
+    }
+
+    async function fetchKlines(symbol, interval = '1h', limit = 200) {
+      const response = await fetch(`${API_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+      return await response.json();
+    }
+
+    function detectCandlePatterns(klines) {
+      if (klines.length < 30) return 'Insufficient Data';
+
+      const lastCandles = klines.slice(-30);
+
+      // Calculate average body and wick sizes for relative comparisons
+      const avgBodySize = lastCandles.reduce((sum, candle) => {
+        return sum + Math.abs(parseFloat(candle[4]) - parseFloat(candle[1]));
+      }, 0) / 30;
+
+      const avgWickSize = lastCandles.reduce((sum, candle) => {
+        return sum + (parseFloat(candle[2]) - parseFloat(candle[3]));
+      }, 0) / 30;
+
+      // Analyze the most recent candle for patterns
+      const curr = lastCandles[lastCandles.length - 1];
+      const prev = lastCandles[lastCandles.length - 2];
+
+      const [currOpen, currHigh, currLow, currClose] = [1, 2, 3, 4].map(i => parseFloat(curr[i]));
+      const [prevOpen, prevHigh, prevLow, prevClose] = [1, 2, 3, 4].map(i => parseFloat(prev[i]));
+
+      const bodySize = Math.abs(currClose - currOpen);
+      const upperWick = currHigh - Math.max(currOpen, currClose);
+      const lowerWick = Math.min(currOpen, currClose) - currLow;
+
+      // Pattern detection with improved criteria
+      if (bodySize <= avgBodySize * 0.1 && (upperWick + lowerWick) >= avgWickSize) {
+        return 'Doji';
+      }
+
+      if (currClose > currOpen && lowerWick >= bodySize * 2 && upperWick <= bodySize * 0.5) {
+        return 'Hammer';
+      }
+
+      if (currClose < currOpen && upperWick >= bodySize * 2 && lowerWick <= bodySize * 0.5) {
+        return 'Shooting Star';
+      }
+
+      if (currClose > currOpen && prevClose < prevOpen &&
+          currClose > prevHigh && currOpen < prevLow &&
+          bodySize > avgBodySize) {
+        return 'Bullish Engulfing';
+      }
+
+      if (currClose < currOpen && prevClose > prevOpen &&
+          currClose < prevLow && currOpen > prevHigh &&
+          bodySize > avgBodySize) {
+        return 'Bearish Engulfing';
+      }
+
+      // Three White Soldiers
+      if (lastCandles.length >= 3) {
+        const threeCandles = lastCandles.slice(-3);
+        const allBullish = threeCandles.every(candle =>
+          parseFloat(candle[4]) > parseFloat(candle[1]));
+        const increasingCloses = threeCandles.every((candle, i) =>
+          i === 0 || parseFloat(candle[4]) > parseFloat(threeCandles[i-1][4]));
+        if (allBullish && increasingCloses) {
+          return 'Three White Soldiers';
+        }
+      }
+
+      // Three Black Crows
+      if (lastCandles.length >= 3) {
+        const threeCandles = lastCandles.slice(-3);
+        const allBearish = threeCandles.every(candle =>
+          parseFloat(candle[4]) < parseFloat(candle[1]));
+        const decreasingCloses = threeCandles.every((candle, i) =>
+          i === 0 || parseFloat(candle[4]) < parseFloat(threeCandles[i-1][4]));
+        if (allBearish && decreasingCloses) {
+          return 'Three Black Crows';
+        }
+      }
+
+      return 'No Pattern';
+    }
+
+
+    function calculateRSI(closes, period = 14) {
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= period; i++) {
+        const diff = closes[i] - closes[i - 1];
+        if (diff >= 0) gains += diff;
+        else losses -= diff;
+      }
+      const avgGain = gains / period;
+      const avgLoss = losses / period;
+      const rs = avgGain / avgLoss || 0;
+      return 100 - (100 / (1 + rs));
+    }
+
+    function calculateMovingAverage(closes, period) {
+      if (closes.length < period) return null;
+      return closes.slice(-period).reduce((sum, price) => sum + price, 0) / period;
+    }
+
+    function calculateCrossStatus(ma7, ma50, prevMa7, prevMa50) {
+      if (prevMa7 < prevMa50 && ma7 > ma50) return 'Golden Cross';
+      if (prevMa7 > ma50 && ma7 < ma50) return 'Death Cross';
+      return 'No Cross';
+    }
+
+    function calculateBollingerBands(closes, period = 20, multiplier = 2) {
+      if (closes.length < period) return { upper: null, lower: null, middle: null };
+
+      const slicedCloses = closes.slice(-period);
+      const middle = slicedCloses.reduce((sum, price) => sum + price, 0) / period;
+      const variance = slicedCloses.reduce((sum, price) => sum + Math.pow(price - middle, 2), 0) / period;
+      const stdDev = Math.sqrt(variance);
+
+      return {
+        upper: middle + multiplier * stdDev,
+        lower: middle - multiplier * stdDev,
+        middle
+      };
+    }
+
+    function calculatePotential(currentPrice, lowerBand, upperBand, rsi) {
+      if (!upperBand || !lowerBand || upperBand === lowerBand) return null;
+
+      const bandPotential = ((currentPrice - lowerBand) / (upperBand - lowerBand)) * 100;
+      let rsiAdjustment = 0;
+
+      if (rsi < 30) rsiAdjustment = 10;
+      else if (rsi > 70) rsiAdjustment = -10;
+
+      const finalPotential = Math.min(100, Math.max(0, bandPotential + rsiAdjustment));
+      return finalPotential.toFixed(2);
+    }
+
+    async function fetchTradingPairs() {
+      const response = await fetch(`${API_URL}/exchangeInfo`);
+      const data = await response.json();
+      return data.symbols
+        .filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT')
+        .map(s => s.symbol);
+    }
+
+    async function populateTable(interval) {
+      const tableBody = document.querySelector('#cryptoTable tbody');
+      tableBody.innerHTML = '';
+      const tradingPairs = await fetchTradingPairs();
+
+      for (const pair of tradingPairs) {
+        try {
+          const klines = await fetchKlines(pair, interval);
+          const closes = klines.map(k => parseFloat(k[4]));
+
+          const rsi = calculateRSI(closes);
+          const ma7 = calculateMovingAverage(closes, 7);
+          const ma20 = calculateMovingAverage(closes, 20);
+          const ma50 = calculateMovingAverage(closes, 50);
+          const ma200 = calculateMovingAverage(closes, 200);
+          const prevMa7 = calculateMovingAverage(closes.slice(0, -1), 7);
+          const prevMa50 = calculateMovingAverage(closes.slice(0, -1), 50);
+          const crossStatus = calculateCrossStatus(ma7, ma50, prevMa7, prevMa50);
+          const pattern = detectCandlePatterns(klines);
+
+          const { upper, lower, middle } = calculateBollingerBands(closes, 20);
+          const currentPrice = closes[closes.length - 1];
+          const rsiStatus = rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral';
+          const potential = calculatePotential(currentPrice, lower, upper, rsi);
+
+          let verdict = 'HOLD';
+          if (rsi < 30 || currentPrice <= lower) verdict = 'BUY';
+          else if (rsi > 70 || currentPrice >= upper) verdict = 'SELL';
+
+          const rsiClass = rsi > 70 ? 'bg-red-200' : rsi < 30 ? 'bg-green-200' : '';
+          const priceClass = currentPrice <= lower ? 'bg-blue-200' : currentPrice >= upper ? 'bg-orange-200' : '';
+
+          const patternClass = pattern.includes('Bullish') ? 'text-green-600' :
+                              pattern.includes('Bearish') ? 'text-red-600' : '';
+
+          const row = `
+            <tr class="hover:bg-gray-100">
+              <td class="p-2">
+                <a href="${tradingViewBaseURL}${pair}"
+                   target="_blank"
+                   class="text-blue-500 hover:underline">
+                  ${pair}
+                </a>
+              </td>
+              <td class="p-2 ${rsiClass}">${rsi.toFixed(5)}</td>
+              <td class="p-2">${rsiStatus}</td>
+              <td class="p-2">${ma7?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma20?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma50?.toFixed(5) || '-'}</td>
+              <td class="p-2">${ma200?.toFixed(5) || '-'}</td>
+              <td class="p-2 ${priceClass}">${currentPrice.toFixed(5)}</td>
+              <td class="p-2">${crossStatus}</td>
+              <td class="p-2 ${patternClass}">${pattern}</td>
+              <td class="p-2">${upper?.toFixed(5) || '-'}</td>
+              <td class="p-2">${middle?.toFixed(5) || '-'}</td>
+              <td class="p-2">${lower?.toFixed(5) || '-'}</td>
+              <td class="p-2">${potential || '-'}</td>
+              <td class="p-2 font-bold ${
+                verdict === 'BUY'
+                  ? 'text-green-600'
+                  : verdict === 'SELL'
+                  ? 'text-red-600'
+                  : 'text-gray-600'
+              }">
+                ${verdict}
+              </td>
+            </tr>
+          `;
+          tableBody.innerHTML += row;
+        } catch (error) {
+          console.error(`Error fetching data for ${pair}:`, error);
+        }
+      }
+    }
+
+    document.getElementById('filterInput').addEventListener('input', function () {
+      const filter = this.value.toUpperCase();
+      const rows = document.querySelectorAll('#cryptoTable tbody tr');
+      rows.forEach(row => {
+        const cellText = row.cells[0].innerText.toUpperCase();
+        row.style.display = cellText.includes(filter) ? '' : 'none';
+      });
+    });
+
+    document.getElementById('intervalSelector').addEventListener('change', function () {
+      const interval = this.value;
+      populateTable(interval);
+    });
+
+    // Display info popup on page load and start populating table
+    window.onload = () => {
+      showInfoPopup();
+      populateTable('1h');
+    };
+  </script>
+</body>
+</html>

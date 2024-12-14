@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Double Top Breakout Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const table = document.getElementById('resultsTable');
+            const headers = table.querySelectorAll('th');
+
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    sortTable(table, index);
+                });
+            });
+
+            const filterInput = document.getElementById('filterInput');
+            filterInput.addEventListener('input', filterTable);
+        });
+
+        function sortTable(table, columnIndex) {
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            const isNumeric = !isNaN(rows[0].children[columnIndex].textContent.trim());
+
+            rows.sort((rowA, rowB) => {
+                const cellA = rowA.children[columnIndex].textContent.trim();
+                const cellB = rowB.children[columnIndex].textContent.trim();
+
+                return isNumeric
+                    ? parseFloat(cellA) - parseFloat(cellB)
+                    : cellA.localeCompare(cellB);
+            });
+
+            rows.forEach(row => table.querySelector('tbody').appendChild(row));
+        }
+
+        function filterTable() {
+            const filter = document.getElementById('filterInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#resultsTable tbody tr');
+
+            rows.forEach(row => {
+                const cells = Array.from(row.children);
+                const matches = cells.some(cell => cell.textContent.toLowerCase().includes(filter));
+                row.style.display = matches ? '' : 'none';
+            });
+        }
+    </script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">Double Top Breakout Scanner</h1>
+
+    <div class="flex flex-wrap gap-4 w-full max-w-6xl mb-6">
+        <div class="w-full sm:w-1/4">
+            <label for="timeframeSelector" class="block mb-1 text-gray-600">Pattern Timeframe:</label>
+            <select id="timeframeSelector" class="border border-gray-300 p-2 rounded w-full">
+                <option value="1d">1 Day</option>
+                <option value="4h">4 Hours</option>
+                <option value="1h">1 Hour</option>
+            </select>
+        </div>
+        <div class="w-full sm:w-1/4">
+            <label for="lookbackPeriod" class="block mb-1 text-gray-600">Lookback Period (Days):</label>
+            <select id="lookbackPeriod" class="border border-gray-300 p-2 rounded w-full">
+                <option value="30">30 Days</option>
+                <option value="60">60 Days</option>
+                <option value="90">90 Days</option>
+                <option value="180" selected>180 Days</option>
+                <option value="365">365 Days</option>
+            </select>
+        </div>
+        <div class="w-full sm:w-1/4">
+            <label for="minDropPercent" class="block mb-1 text-gray-600">Min Drop After Pattern (%):</label>
+            <input type="number" id="minDropPercent" value="20" min="10" max="50" step="1"
+                   class="border border-gray-300 p-2 rounded w-full">
+        </div>
+        <div class="w-full sm:w-1/4">
+            <label for="minReboundPercent" class="block mb-1 text-gray-600">Min Rebound (%):</label>
+            <input type="number" id="minReboundPercent" value="10" min="5" max="30" step="1"
+                   class="border border-gray-300 p-2 rounded w-full">
+        </div>
+        <button id="scanButton"
+                class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 mt-auto">
+            Scan for Breakout Candidates
+        </button>
+    </div>
+
+    <div class="w-full max-w-6xl overflow-x-auto">
+        <table id="resultsTable" class="min-w-full bg-white shadow-md rounded">
+            <thead class="bg-gray-200">
+                <tr>
+                    <th class="p-3 text-left">Symbol</th>
+                    <th class="p-3 text-left">Pattern High</th>
+                    <th class="p-3 text-left">Drop Low</th>
+                    <th class="p-3 text-left">Current Price</th>
+                    <th class="p-3 text-left">Drop %</th>
+                    <th class="p-3 text-left">Rebound %</th>
+                    <th class="p-3 text-left">Volume Change</th>
+                    <th class="p-3 text-left">RSI</th>
+                    <th class="p-3 text-left">Early Reversal</th>
+                    <th class="p-3 text-left">Breakout Probability</th>
+                    <th class="p-3 text-left">Price Position</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Results will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="loadingIndicator" class="hidden mt-4 text-gray-600">
+        Scanning markets... <span id="progress">0/0</span>
+    </div>
+
+    <script>
+        const API_URL = 'https://api.binance.com/api/v3';
+
+        async function fetchTradingPairs() {
+            const response = await fetch(`${API_URL}/exchangeInfo`);
+            const data = await response.json();
+            return data.symbols
+                .filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT')
+                .map(s => s.symbol);
+        }
+
+        async function fetchKlines(symbol, interval = '1d', limit = 180) {
+            try {
+                const response = await fetch(
+                    `${API_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+                );
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching klines for ${symbol}:`, error);
+                return null;
+            }
+        }
+
+        function calculateRSI(closes, period = 14) {
+            let gains = 0, losses = 0;
+            for (let i = 1; i <= period; i++) {
+                const diff = closes[i] - closes[i - 1];
+                if (diff >= 0) gains += diff;
+                else losses -= diff;
+            }
+            let avgGain = gains / period;
+            let avgLoss = losses / period;
+
+            // Calculate RSI using traditional formula
+            for (let i = period + 1; i < closes.length; i++) {
+                const diff = closes[i] - closes[i - 1];
+                avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+                avgLoss = (avgLoss * (period - 1) + (diff < 0 ? -diff : 0)) / period;
+            }
+
+            const rs = avgGain / avgLoss;
+            return 100 - (100 / (1 + rs));
+        }
+
+        function detectDoubleTopBreakout(klines, minDropPercent, minReboundPercent) {
+            if (!klines || klines.length < 30) return null;
+
+            const highs = klines.map(k => parseFloat(k[2]));
+            const lows = klines.map(k => parseFloat(k[3]));
+            const closes = klines.map(k => parseFloat(k[4]));
+            const volumes = klines.map(k => parseFloat(k[5]));
+
+            // Find the highest point (potential double top area)
+            const maxPrice = Math.max(...highs.slice(0, -30)); // Exclude recent price for completed patterns
+            const maxIndex = highs.indexOf(maxPrice);
+
+            // Find the low after the pattern
+            const subsequentLows = lows.slice(maxIndex + 1);
+            const minAfterPattern = Math.min(...subsequentLows);
+            const dropPercent = ((maxPrice - minAfterPattern) / maxPrice) * 100;
+
+            // If drop isn't significant enough, pattern isn't valid
+            if (dropPercent < minDropPercent) return null;
+
+            // Calculate current rebound
+            const currentPrice = closes[closes.length - 1];
+            const reboundPercent = ((currentPrice - minAfterPattern) / minAfterPattern) * 100;
+
+            // Check if it's an early reversal opportunity (minimal rebound)
+            const isEarlyReversal = reboundPercent < minReboundPercent && reboundPercent > 2;
+
+            // Calculate volume change
+            const recentVolume = volumes.slice(-7).reduce((a, b) => a + b, 0) / 7;
+            const previousVolume = volumes.slice(-14, -7).reduce((a, b) => a + b, 0) / 7;
+            const volumeChange = ((recentVolume - previousVolume) / previousVolume) * 100;
+
+            // Calculate RSI
+            const rsi = calculateRSI(closes);
+
+            // Calculate breakout probability based on multiple factors
+            let probability = 0;
+
+            // Volume factor (30% weight)
+            if (volumeChange > 50) probability += 30;
+            else if (volumeChange > 20) probability += 20;
+            else if (volumeChange > 0) probability += 10;
+
+            // RSI factor (30% weight)
+            if (rsi > 30 && rsi < 70) probability += 30;
+            else if (rsi > 20 && rsi < 80) probability += 15;
+
+            // Rebound strength factor (40% weight)
+            if (reboundPercent > 20) probability += 40;
+            else if (reboundPercent > 15) probability += 30;
+            else if (reboundPercent > 10) probability += 20;
+
+            // Calculate price position (0% = at low, 100% = at high)
+            const priceRange = maxPrice - minAfterPattern;
+            const currentPosition = ((currentPrice - minAfterPattern) / priceRange) * 100;
+
+            // Adjust probability based on price position
+            if (currentPosition <= 30) probability += 10; // Bonus for being closer to bottom
+
+            return {
+                patternHigh: maxPrice,
+                dropLow: minAfterPattern,
+                currentPrice: currentPrice,
+                dropPercent: dropPercent.toFixed(2),
+                reboundPercent: reboundPercent.toFixed(2),
+                volumeChange: volumeChange.toFixed(2),
+                rsi: rsi.toFixed(2),
+                isEarlyReversal: isEarlyReversal,
+                breakoutProbability: probability,
+                pricePosition: currentPosition.toFixed(2)
+            };
+        }
+
+        function addResultToTable(symbol, result) {
+            const tbody = document.querySelector('#resultsTable tbody');
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50';
+
+            const probabilityClass = result.breakoutProbability >= 70 ? 'text-green-600' :
+                                   result.breakoutProbability >= 50 ? 'text-blue-600' : 'text-gray-600';
+
+            const isReboundLessThanDrop = parseFloat(result.reboundPercent) < parseFloat(result.dropPercent);
+row.className = isReboundLessThanDrop ? 'bg-green-50' : '';
+
+row.innerHTML = `
+    <td class="p-3">${symbol}</td>
+    <td class="p-3">${result.patternHigh.toFixed(4)}</td>
+    <td class="p-3">${result.dropLow.toFixed(4)}</td>
+    <td class="p-3">${result.currentPrice.toFixed(4)}</td>
+    <td class="p-3">${result.dropPercent}</td>
+    <td class="p-3">${result.reboundPercent}</td>
+    <td class="p-3">${result.volumeChange}</td>
+    <td class="p-3">${result.rsi}</td>
+    <td class="p-3">
+        ${result.isEarlyReversal ?
+        '<span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm font-semibold">Early Stage</span>' :
+        '<span class="text-gray-500">-</span>'}
+    </td>
+    <td class="p-3 ${probabilityClass} font-semibold">${result.breakoutProbability}</td>
+    <td class="p-3">
+        <div class="flex items-center">
+            <div class="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
+                <div class="bg-blue-600 h-2.5 rounded-full" style="width: ${result.pricePosition}"></div>
+            </div>
+            <span class="text-sm ${
+                parseFloat(result.pricePosition) <= 30 ? 'text-green-600 font-semibold' :
+                parseFloat(result.pricePosition) <= 50 ? 'text-blue-600' : 'text-gray-600'
+            }">${result.pricePosition}</span>
+        </div>
+    </td>
+`;
+
+            tbody.appendChild(row);
+        }
+
+        async function scanMarkets() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const progressSpan = document.getElementById('progress');
+            const tbody = document.querySelector('#resultsTable tbody');
+            const timeframe = document.getElementById('timeframeSelector').value;
+            const lookbackDays = parseInt(document.getElementById('lookbackPeriod').value);
+            const minDropPercent = parseFloat(document.getElementById('minDropPercent').value);
+            const minReboundPercent = parseFloat(document.getElementById('minReboundPercent').value);
+
+            // Calculate number of candles needed based on timeframe
+            let candleLimit;
+            switch(timeframe) {
+                case '1h':
+                    candleLimit = lookbackDays * 24;
+                    break;
+                case '4h':
+                    candleLimit = lookbackDays * 6;
+                    break;
+                case '1d':
+                    candleLimit = lookbackDays;
+                    break;
+                default:
+                    candleLimit = lookbackDays;
+            }
+
+            loadingIndicator.classList.remove('hidden');
+            tbody.innerHTML = '';
+
+            try {
+                const pairs = await fetchTradingPairs();
+                progressSpan.textContent = `0/${pairs.length}`;
+
+                let processed = 0;
+                for (const pair of pairs) {
+                    const klines = await fetchKlines(pair, timeframe, candleLimit);
+                    if (klines) {
+                        const result = detectDoubleTopBreakout(klines, minDropPercent, minReboundPercent);
+                        if (result) {
+                            addResultToTable(pair, result);
+                        }
+                    }
+                    processed++;
+                    progressSpan.textContent = `${processed}/${pairs.length}`;
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Rate limiting
+                }
+            } catch (error) {
+                console.error('Error scanning markets:', error);
+                alert('Error scanning markets. Please try again.');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('scanButton').addEventListener('click', scanMarkets);
+
+        // Initial scan
+        scanMarkets();
+    </script>
+</body>
+</html>

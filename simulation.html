@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Paper Trading</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash/4.17.21/lodash.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .screen {
+            display: none;
+        }
+        .active {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .crypto-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .simulation-item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .crypto-result {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .profit {
+            color: #22c55e;
+            font-weight: bold;
+        }
+        .loss {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        .price-change {
+            animation: flash 0.5s;
+        }
+        @keyframes flash {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(255, 255, 0, 0.2); }
+            100% { background-color: transparent; }
+        }
+        .realtime-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-left: 5px;
+        }
+        .realtime-active {
+            background-color: #22c55e;
+            animation: pulse 2s infinite;
+        }
+        .realtime-inactive {
+            background-color: #ef4444;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .total-summary {
+            background-color: #f8fafc;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            border: 1px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Screen -->
+        <div id="loginScreen" class="screen active">
+            <h2>Login</h2>
+            <div class="form-group">
+                <input type="text" id="username" placeholder="Username">
+            </div>
+            <div class="form-group">
+                <input type="password" id="password" placeholder="Password">
+            </div>
+            <button onclick="login()">Login</button>
+            <button onclick="register()">Register</button>
+        </div>
+
+        <!-- Trading Screen -->
+        <div id="tradingScreen" class="screen">
+            <h2>Paper Trading Setup</h2>
+            <div class="form-group">
+                <input type="text" id="searchCrypto" placeholder="Search USDT pairs...">
+                <input type="number" id="capital" placeholder="Enter capital amount">
+            </div>
+            <div class="crypto-list" id="cryptoList"></div>
+            <button onclick="startSimulation()">Start Simulation</button>
+            <button onclick="viewSimulations()">View Simulations</button>
+            <button onclick="logout()">Logout</button>
+        </div>
+
+        <!-- Simulations Screen -->
+        <div id="simulationsScreen" class="screen">
+            <h2>Your Simulations <span id="websocketStatus" class="realtime-indicator realtime-inactive"></span></h2>
+            <div id="simulationsList"></div>
+            <button onclick="backToTrading()">Back to Trading</button>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentUser = null;
+        let cryptoData = [];
+        let selectedCryptos = new Set();
+        let websocket = null;
+        let currentPrices = {};
+        let activeSimulations = [];
+
+        // Initialize app
+        async function init() {
+            if (localStorage.getItem('currentUser')) {
+                currentUser = JSON.parse(localStorage.getItem('currentUser'));
+                showScreen('tradingScreen');
+                await fetchCryptoData();
+            }
+        }
+
+        // WebSocket Management
+        function setupWebSocket(symbols) {
+            if (websocket) {
+                websocket.close();
+            }
+
+            const streams = symbols.map(symbol => `${symbol.toLowerCase()}@trade`).join('/');
+            websocket = new WebSocket(`wss://stream.binance.com:9443/ws/${streams}`);
+
+            websocket.onopen = () => {
+                document.getElementById('websocketStatus').className = 'realtime-indicator realtime-active';
+            };
+
+            websocket.onclose = () => {
+                document.getElementById('websocketStatus').className = 'realtime-indicator realtime-inactive';
+            };
+
+            websocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const symbol = data.s;
+                const price = parseFloat(data.p);
+
+                if (currentPrices[symbol] !== price) {
+                    currentPrices[symbol] = price;
+                    updateSimulationPrices(symbol, price);
+                }
+            };
+
+            websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                document.getElementById('websocketStatus').className = 'realtime-indicator realtime-inactive';
+            };
+        }
+
+        function updateSimulationPrices(symbol, newPrice) {
+            const elements = document.querySelectorAll(`[data-symbol="${symbol}"]`);
+            elements.forEach(element => {
+                const initialPrice = parseFloat(element.dataset.initial);
+                const profitPercent = ((newPrice - initialPrice) / initialPrice) * 100;
+                const priceElement = element.querySelector('.current-price');
+                const profitElement = element.querySelector('.profit-loss');
+
+                // Update price with animation
+                priceElement.textContent = `$${newPrice.toFixed(4)}`;
+                priceElement.classList.add('price-change');
+                setTimeout(() => priceElement.classList.remove('price-change'), 500);
+
+                // Update profit/loss
+                profitElement.textContent = `${profitPercent.toFixed(2)}%`;
+                profitElement.className = `profit-loss ${profitPercent >= 0 ? 'profit' : 'loss'}`;
+
+                // Update total simulation profit
+                updateSimulationTotal(element.closest('.simulation-item'));
+            });
+        }
+
+        function updateSimulationTotal(simulationElement) {
+            const profitElements = simulationElement.querySelectorAll('.profit-loss');
+            let totalProfit = 0;
+            profitElements.forEach(element => {
+                totalProfit += parseFloat(element.textContent);
+            });
+
+            const avgProfit = totalProfit / profitElements.length;
+            const totalElement = simulationElement.querySelector('.total-profit');
+            totalElement.textContent = `${avgProfit.toFixed(2)}%`;
+            totalElement.className = `total-profit ${avgProfit >= 0 ? 'profit' : 'loss'}`;
+        }
+
+        // User management
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const users = JSON.parse(localStorage.getItem('users') || '{}');
+
+            if (users[username] && users[username].password === password) {
+                currentUser = { username };
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                showScreen('tradingScreen');
+                fetchCryptoData();
+            } else {
+                alert('Invalid credentials');
+            }
+        }
+
+        function register() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+
+            const users = JSON.parse(localStorage.getItem('users') || '{}');
+
+            if (users[username]) {
+                alert('Username already exists');
+                return;
+            }
+
+            users[username] = { password };
+            localStorage.setItem('users', JSON.stringify(users));
+            alert('Registration successful! Please login.');
+        }
+
+        function logout() {
+            if (websocket) {
+                websocket.close();
+            }
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            showScreen('loginScreen');
+        }
+
+        // Screen management
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        // Crypto data management
+        async function fetchCryptoData() {
+            try {
+                const response = await fetch('https://api.binance.com/api/v3/ticker/price');
+                const data = await response.json();
+                cryptoData = data.filter(item => item.symbol.endsWith('USDT'));
+                displayCryptoList();
+            } catch (error) {
+                console.error('Error fetching crypto data:', error);
+                alert('Error fetching crypto data');
+            }
+        }
+
+        function displayCryptoList() {
+            const searchTerm = document.getElementById('searchCrypto').value.toLowerCase();
+            const filteredData = cryptoData.filter(item =>
+                item.symbol.toLowerCase().includes(searchTerm)
+            );
+
+            const cryptoList = document.getElementById('cryptoList');
+            cryptoList.innerHTML = filteredData.map(crypto => `
+                <div>
+                    <input type="checkbox" id="${crypto.symbol}"
+                           ${selectedCryptos.has(crypto.symbol) ? 'checked' : ''}
+                           onchange="toggleCrypto('${crypto.symbol}')">
+                    <label for="${crypto.symbol}">${crypto.symbol} - ${parseFloat(crypto.price).toFixed(4)}</label>
+                </div>
+            `).join('');
+        }
+
+        function toggleCrypto(symbol) {
+            if (selectedCryptos.has(symbol)) {
+                selectedCryptos.delete(symbol);
+            } else {
+                selectedCryptos.add(symbol);
+            }
+        }
+
+        // Simulation management
+        async function startSimulation() {
+            const capital = parseFloat(document.getElementById('capital').value);
+
+            if (!capital || selectedCryptos.size === 0) {
+                alert('Please enter capital amount and select cryptocurrencies');
+                return;
+            }
+
+            const capitalPerCrypto = capital / selectedCryptos.size;
+            const timestamp = new Date().toISOString();
+
+            const simulation = {
+                id: Date.now(),
+                timestamp,
+                capital,
+                selectedCryptos: Array.from(selectedCryptos),
+                initialPrices: {},
+                user: currentUser.username
+            };
+
+            // Record initial prices
+            for (const symbol of selectedCryptos) {
+                const crypto = cryptoData.find(c => c.symbol === symbol);
+                simulation.initialPrices[symbol] = parseFloat(crypto.price);
+            }
+
+            // Save simulation
+            const simulations = JSON.parse(localStorage.getItem('simulations') || '[]');
+            simulations.push(simulation);
+            localStorage.setItem('simulations', JSON.stringify(simulations));
+
+            // Save to file
+            const blob = new Blob([JSON.stringify(simulations, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `crypto_simulations_${currentUser.username}.json`;
+            a.click();
+
+            alert('Simulation started successfully!');
+            viewSimulations();
+        }
+
+        async function viewSimulations() {
+            showScreen('simulationsScreen');
+            const simulations = JSON.parse(localStorage.getItem('simulations') || '[]')
+                .filter(sim => sim.user === currentUser.username);
+
+            // Get all unique symbols from all simulations
+            const allSymbols = new Set();
+            simulations.forEach(sim => {
+                sim.selectedCryptos.forEach(symbol => allSymbols.add(symbol));
+            });
+
+            // Setup WebSocket for all symbols
+            setupWebSocket(Array.from(allSymbols));
+
+            const simulationsList = document.getElementById('simulationsList');
+            simulationsList.innerHTML = simulations.map(sim => {
+                const cryptoResults = sim.selectedCryptos.map(symbol => {
+                    const initialPrice = sim.initialPrices[symbol];
+                    return `
+                        <div class="crypto-result" data-symbol="${symbol}" data-initial="${initialPrice}">
+                            <span class="symbol">${symbol}</span>
+                            <span>Initial: $${initialPrice.toFixed(4)}</span>
+                            <span class="current-price">$${initialPrice.toFixed(4)}</span>
+                            <span class="profit-loss">0.00%</span>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="simulation-item">
+                        <h3>Simulation from ${new Date(sim.timestamp).toLocaleString()}</h3>
+                        <p>Capital: $${sim.capital.toFixed(2)}</p>
+                        <div class="total-summary">
+                            Total Portfolio: <span class="total-profit">0.00%</span>
+                        </div>
+                        ${cryptoResults}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function backToTrading() {
+            if (websocket) {
+                websocket.close();
+            }
+            showScreen('tradingScreen');
+        }
+
+        // Event listeners
+        document.getElementById('searchCrypto').addEventListener('input', displayCryptoList);
+
+        // Initialize app
+        init();
+    </script>
+</body>
+</html>
