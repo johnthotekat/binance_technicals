@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Signal Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Crypto Signal Dashboard</h1>
+            <p class="text-gray-600 mt-2">Signals: Golden Cross + Three White Soldiers | Below Middle BB | MA7 < MA20</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex gap-4 mb-6">
+            <select id="intervalSelect" class="border rounded p-2">
+                <option value="1h">1 Hour</option>
+                <option value="4h">4 Hours</option>
+                <option value="1d">1 Day</option>
+            </select>
+            <input
+                type="text"
+                id="searchInput"
+                placeholder="Search pairs..."
+                class="border rounded p-2 flex-grow"
+            >
+            <button
+                id="refreshButton"
+                class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+                Refresh Analysis
+            </button>
+        </div>
+
+        <!-- Medals Summary -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-yellow-100 p-4 rounded-lg">
+                <h3 class="font-bold text-yellow-800">🥇 GOLD Signals</h3>
+                <p id="goldCount" class="text-2xl font-bold text-yellow-600">0</p>
+            </div>
+            <div class="bg-gray-100 p-4 rounded-lg">
+                <h3 class="font-bold text-gray-800">🥈 SILVER Signals</h3>
+                <p id="silverCount" class="text-2xl font-bold text-gray-600">0</p>
+            </div>
+            <div class="bg-orange-100 p-4 rounded-lg">
+                <h3 class="font-bold text-orange-800">🥉 BRONZE Signals</h3>
+                <p id="bronzeCount" class="text-2xl font-bold text-orange-600">0</p>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden">
+            <div class="fixed top-0 left-0 w-full h-full bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+                <div class="bg-white p-4 rounded-lg">
+                    <p class="text-lg font-semibold">Analyzing market data...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Table -->
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full" id="signalTable">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Medal</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pair</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RSI</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cross Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pattern</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MA7</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MA20</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">BB Middle</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Conditions Met</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200" id="signalTableBody">
+                    <!-- Data will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://api.binance.com/api/v3';
+        const WS_URL = 'wss://stream.binance.com:9443/ws';
+        let websocket = null;
+        let cryptoData = new Map();
+
+        // Technical Analysis Functions
+        function detectCandlePatterns(klines) {
+            if (klines.length < 30) return 'Insufficient Data';
+
+            const lastCandles = klines.slice(-30);
+
+            // Calculate average body and wick sizes
+            const avgBodySize = lastCandles.reduce((sum, candle) => {
+                return sum + Math.abs(parseFloat(candle[4]) - parseFloat(candle[1]));
+            }, 0) / 30;
+
+            const avgWickSize = lastCandles.reduce((sum, candle) => {
+                return sum + (parseFloat(candle[2]) - parseFloat(candle[3]));
+            }, 0) / 30;
+
+            const curr = lastCandles[lastCandles.length - 1];
+            const prev = lastCandles[lastCandles.length - 2];
+
+            const [currOpen, currHigh, currLow, currClose] = [1, 2, 3, 4].map(i => parseFloat(curr[i]));
+            const [prevOpen, prevHigh, prevLow, prevClose] = [1, 2, 3, 4].map(i => parseFloat(prev[i]));
+
+            const bodySize = Math.abs(currClose - currOpen);
+            const upperWick = currHigh - Math.max(currOpen, currClose);
+            const lowerWick = Math.min(currOpen, currClose) - currLow;
+
+            if (lastCandles.length >= 3) {
+                const threeCandles = lastCandles.slice(-3);
+                const allBullish = threeCandles.every(candle =>
+                    parseFloat(candle[4]) > parseFloat(candle[1]));
+                const increasingCloses = threeCandles.every((candle, i) =>
+                    i === 0 || parseFloat(candle[4]) > parseFloat(threeCandles[i-1][4]));
+                if (allBullish && increasingCloses) {
+                    return 'Three White Soldiers';
+                }
+            }
+
+            return 'No Pattern';
+        }
+
+        function calculateRSI(closes, period = 14) {
+            if (closes.length < period + 1) return null;
+
+            let gains = 0, losses = 0;
+            for (let i = 1; i <= period; i++) {
+                const diff = closes[i] - closes[i - 1];
+                if (diff >= 0) gains += diff;
+                else losses -= diff;
+            }
+
+            let avgGain = gains / period;
+            let avgLoss = losses / period;
+
+            for (let i = period + 1; i < closes.length; i++) {
+                const diff = closes[i] - closes[i - 1];
+                avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+                avgLoss = (avgLoss * (period - 1) + (diff < 0 ? -diff : 0)) / period;
+            }
+
+            const rs = avgGain / avgLoss;
+            return 100 - (100 / (1 + rs));
+        }
+
+        function calculateMA(closes, period) {
+            if (closes.length < period) return null;
+            return closes.slice(-period).reduce((sum, price) => sum + price, 0) / period;
+        }
+
+        function calculateBollingerBands(closes, period = 20, multiplier = 2) {
+            if (closes.length < period) return { upper: null, middle: null, lower: null };
+
+            const ma = calculateMA(closes, period);
+            const variance = closes.slice(-period).reduce((sum, price) => {
+                return sum + Math.pow(price - ma, 2);
+            }, 0) / period;
+            const stdDev = Math.sqrt(variance);
+
+            return {
+                upper: ma + (multiplier * stdDev),
+                middle: ma,
+                lower: ma - (multiplier * stdDev)
+            };
+        }
+
+        function calculateCrossStatus(ma7, ma50, prevMa7, prevMa50) {
+            if (!ma7 || !ma50 || !prevMa7 || !prevMa50) return 'No Cross';
+            if (prevMa7 < prevMa50 && ma7 > ma50) return 'Golden Cross';
+            if (prevMa7 > prevMa50 && ma7 < ma50) return 'Death Cross';
+            return 'No Cross';
+        }
+
+        // Check for signal conditions
+        function checkConditions(crypto) {
+            let conditions = [];
+
+            // Condition 1: Golden Cross + Three White Soldiers
+            if (crypto.crossStatus === 'Golden Cross' && crypto.pattern === 'Three White Soldiers') {
+                conditions.push('Cross+Pattern');
+            }
+
+            // Condition 2: Below Middle Bollinger Band
+            if (crypto.currentPrice < crypto.bollingerMiddle) {
+                conditions.push('Below BB');
+            }
+
+            // Condition 3: MA7 < MA20
+            if (crypto.ma7 < crypto.ma20) {
+                conditions.push('MA Trend');
+            }
+
+            return {
+                conditions: conditions,
+                medal: conditions.length === 3 ? 'GOLD' :
+                       conditions.length === 2 ? 'SILVER' :
+                       conditions.length === 1 ? 'BRONZE' : null
+            };
+        }
+
+        async function fetchKlines(symbol, interval = '1h', limit = 200) {
+            const response = await fetch(`${API_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+            return await response.json();
+        }
+
+        async function fetchTradingPairs() {
+            const response = await fetch(`${API_URL}/exchangeInfo`);
+            const data = await response.json();
+            return data.symbols
+                .filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT')
+                .map(s => s.symbol);
+        }
+
+        function updateUI() {
+            const tableBody = document.getElementById('signalTableBody');
+            tableBody.innerHTML = '';
+
+            let goldCount = 0, silverCount = 0, bronzeCount = 0;
+
+            cryptoData.forEach((crypto, pair) => {
+                const { conditions, medal } = checkConditions(crypto);
+                if (!medal) return;
+
+                if (medal === 'GOLD') goldCount++;
+                if (medal === 'SILVER') silverCount++;
+                if (medal === 'BRONZE') bronzeCount++;
+
+                const row = `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                ${medal === 'GOLD' ? 'bg-yellow-100 text-yellow-800' :
+                                  medal === 'SILVER' ? 'bg-gray-100 text-gray-800' :
+                                  'bg-orange-100 text-orange-800'}">
+                                ${medal}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">${pair}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.currentPrice.toFixed(8)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.rsi.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.crossStatus}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.pattern}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.ma7.toFixed(8)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.ma20.toFixed(8)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.bollingerMiddle.toFixed(8)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${conditions.join(', ')}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+
+            document.getElementById('goldCount').textContent = goldCount;
+            document.getElementById('silverCount').textContent = silverCount;
+            document.getElementById('bronzeCount').textContent = bronzeCount;
+        }
+
+        // Initialize WebSocket connection
+        function initializeWebSocket(pairs) {
+            if (websocket) {
+                websocket.close();
+            }
+
+            websocket = new WebSocket(WS_URL);
+
+            websocket.onopen = () => {
+                const streams = pairs.map(pair => `${pair.toLowerCase()}@ticker`);
+                const subscribeMessage = {
+                    method: 'SUBSCRIBE',
+                    params: streams,
+                    id: 1
+                };
+                websocket.send(JSON.stringify(subscribeMessage));
+            };
+
+            websocket.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                if (data.s) {
+                    const pair = data.s;
+                    const price = parseFloat(data.c);
+
+                    if (cryptoData.has(pair)) {
+                        const crypto = cryptoData.get(pair);
+                        crypto.currentPrice = price;
+                        cryptoData.set(pair, crypto);
+                        updateUI();
+                    }
+                }
+            };
+
+            websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        async function loadInitialData(interval = '1h') {
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            try {
+                const pairs = await fetchTradingPairs();
+                cryptoData.clear();
+
+                // Process first 100 pairs (to avoid rate limits)
+                for (const pair of pairs.slice(0, 100)) {
+                    try {
+                        const klines = await fetchKlines(pair, interval);
+                        if (klines.length < 200) continue;
+
+                        const closes = klines.map(k => parseFloat(k[4]));
+                        const currentPrice = closes[closes.length - 1];
+
+                        // Calculate indicators
+                        const rsi = calculateRSI(closes);
+                        const ma7 = calculateMA(closes, 7);
+                        const ma20 = calculateMA(closes, 20);
+                        const ma50 = calculateMA(closes, 50);
+                        const prevMa7 = calculateMA(closes.slice(0, -1), 7);
+                        const prevMa50 = calculateMA(closes.slice(0, -1), 50);
+                        const crossStatus = calculateCrossStatus(ma7, ma50, prevMa7, prevMa50);
+                        const pattern = detectCandlePatterns(klines);
+                        const { middle: bollingerMiddle } = calculateBollingerBands(closes);
+
+                        const cryptoInfo = {
+                            currentPrice,
+                            rsi,
+                            crossStatus,
+                            pattern,
+                            ma7,
+                            ma20,
+                            bollingerMiddle
+                        };
+
+                        // Only add to cryptoData if at least one condition is met
+                        const { medal } = checkConditions(cryptoInfo);
+                        if (medal) {
+                            cryptoData.set(pair, cryptoInfo);
+                        }
+                    } catch (error) {
+                        console.error(`Error processing ${pair}:`, error);
+                    }
+                }
+
+                updateUI();
+                initializeWebSocket(Array.from(cryptoData.keys()));
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+            } finally {
+                document.getElementById('loadingIndicator').classList.add('hidden');
+            }
+        }
+
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#signalTableBody tr');
+
+            rows.forEach(row => {
+                const pair = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
+                row.style.display = pair.includes(searchTerm) ? '' : 'none';
+            });
+        });
+
+        // Interval selection and refresh
+        document.getElementById('intervalSelect').addEventListener('change', function(e) {
+            loadInitialData(e.target.value);
+        });
+
+        document.getElementById('refreshButton').addEventListener('click', function() {
+            const interval = document.getElementById('intervalSelect').value;
+            loadInitialData(interval);
+        });
+
+        // Initialize on page load
+        window.onload = () => {
+            loadInitialData();
+        };
+
+        // Cleanup
+        window.addEventListener('beforeunload', () => {
+            if (websocket) {
+                websocket.close();
+            }
+        });
+    </script>
+</body>
+</html>

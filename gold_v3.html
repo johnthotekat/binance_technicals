@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Trading Signal Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Advanced Trading Signal Dashboard</h1>
+            <p class="text-gray-600 mt-2">Advanced Technical Analysis with Market Momentum and Volume Indicators</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-wrap gap-4 mb-6">
+            <select id="intervalSelect" class="border rounded p-2">
+                <option value="1h">1 Hour</option>
+                <option value="4h">4 Hours</option>
+                <option value="1d">1 Day</option>
+            </select>
+            <input
+                type="text"
+                id="searchInput"
+                placeholder="Search pairs..."
+                class="border rounded p-2 flex-grow"
+            >
+            <select id="sortBy" class="border rounded p-2">
+                <option value="score">Sort by Score</option>
+                <option value="volume">Sort by Volume</option>
+                <option value="volatility">Sort by Volatility</option>
+                <option value="momentum">Sort by Momentum</option>
+            </select>
+            <button
+                id="refreshButton"
+                class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 flex items-center gap-2"
+            >
+                <span>Refresh Analysis</span>
+                <span id="loadingSpinner" class="hidden">
+                    <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </span>
+            </button>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center">
+                <svg class="animate-spin h-10 w-10 text-blue-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-lg font-semibold text-gray-700">Analyzing Market Data...</p>
+                <p id="loadingProgress" class="text-sm text-gray-500 mt-2">Processing pairs: 0/100</p>
+            </div>
+        </div>
+
+        <!-- Medal Categories -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div id="goldCategory" class="bg-yellow-100 p-4 rounded-lg cursor-pointer hover:bg-yellow-200 transition-colors">
+                <h3 class="font-bold text-yellow-800">🥇 GOLD Signals</h3>
+                <p id="goldCount" class="text-2xl font-bold text-yellow-600">0</p>
+                <p class="text-sm text-yellow-700 mt-2">Strong trend + High volume + Multiple confirmations</p>
+            </div>
+            <div id="silverCategory" class="bg-gray-100 p-4 rounded-lg cursor-pointer hover:bg-gray-200 transition-colors">
+                <h3 class="font-bold text-gray-800">🥈 SILVER Signals</h3>
+                <p id="silverCount" class="text-2xl font-bold text-gray-600">0</p>
+                <p class="text-sm text-gray-700 mt-2">Emerging trends with confirmation signals</p>
+            </div>
+            <div id="bronzeCategory" class="bg-orange-100 p-4 rounded-lg cursor-pointer hover:bg-orange-200 transition-colors">
+                <h3 class="font-bold text-orange-800">🥉 BRONZE Signals</h3>
+                <p id="bronzeCount" class="text-2xl font-bold text-orange-600">0</p>
+                <p class="text-sm text-orange-700 mt-2">Early signals requiring validation</p>
+            </div>
+        </div>
+
+        <!-- Analytics Summary -->
+        <div id="analyticsSummary" class="bg-white p-4 rounded-lg shadow mb-6 hidden">
+            <h3 class="font-bold text-lg mb-2">Category Analysis</h3>
+            <div id="categoryDetails"></div>
+        </div>
+
+        <!-- Main Table -->
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full" id="signalTable">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Medal</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pair</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">24h Change</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Volume Score</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trend Score</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Momentum</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overall Score</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Signals</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200" id="signalTableBody">
+                    <!-- Data will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://api.binance.com/api/v3';
+        let cryptoData = new Map();
+        let currentFilter = 'all';
+
+        // Show/Hide loading states
+        function toggleLoading(show) {
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const refreshButton = document.getElementById('refreshButton');
+
+            if (show) {
+                loadingOverlay.classList.remove('hidden');
+                loadingSpinner.classList.remove('hidden');
+                refreshButton.disabled = true;
+                refreshButton.classList.add('opacity-75');
+            } else {
+                loadingOverlay.classList.add('hidden');
+                loadingSpinner.classList.add('hidden');
+                refreshButton.disabled = false;
+                refreshButton.classList.remove('opacity-75');
+            }
+        }
+
+        // Update loading progress
+        function updateLoadingProgress(current, total) {
+            const progressElement = document.getElementById('loadingProgress');
+            progressElement.textContent = `Processing pairs: ${current}/${total}`;
+        }
+
+        // Technical Analysis Functions
+        function calculateMA(closes, period) {
+            if (closes.length < period) return null;
+            return closes.slice(-period).reduce((sum, price) => sum + price, 0) / period;
+        }
+
+        function calculateEMA(data, period) {
+            if (data.length < period) return null;
+            const k = 2 / (period + 1);
+            let ema = data[0];
+
+            for (let i = 1; i < data.length; i++) {
+                ema = (data[i] * k) + (ema * (1 - k));
+            }
+
+            return ema;
+        }
+
+        function calculateRSI(closes, period = 14) {
+            if (closes.length < period + 1) return null;
+
+            let gains = 0, losses = 0;
+            for (let i = 1; i <= period; i++) {
+                const diff = closes[i] - closes[i - 1];
+                if (diff >= 0) gains += diff;
+                else losses -= diff;
+            }
+
+            let avgGain = gains / period;
+            let avgLoss = losses / period;
+
+            for (let i = period + 1; i < closes.length; i++) {
+                const diff = closes[i] - closes[i - 1];
+                avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+                avgLoss = (avgLoss * (period - 1) + (diff < 0 ? -diff : 0)) / period;
+            }
+
+            const rs = avgGain / avgLoss;
+            return 100 - (100 / (1 + rs));
+        }
+
+        function calculateADX(highs, lows, closes, period = 14) {
+            if (highs.length < period + 1) return null;
+
+            let plusDM = [], minusDM = [], tr = [];
+
+            for (let i = 1; i < highs.length; i++) {
+                tr.push(Math.max(
+                    highs[i] - lows[i],
+                    Math.abs(highs[i] - closes[i-1]),
+                    Math.abs(lows[i] - closes[i-1])
+                ));
+
+                plusDM.push(highs[i] - highs[i-1] > lows[i-1] - lows[i] ?
+                    Math.max(highs[i] - highs[i-1], 0) : 0);
+
+                minusDM.push(lows[i-1] - lows[i] > highs[i] - highs[i-1] ?
+                    Math.max(lows[i-1] - lows[i], 0) : 0);
+            }
+
+            const atr = calculateEMA(tr, period);
+            if (!atr) return null;
+
+            const plusDI = (calculateEMA(plusDM, period) / atr) * 100;
+            const minusDI = (calculateEMA(minusDM, period) / atr) * 100;
+
+            if (!plusDI || !minusDI) return null;
+
+            const dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
+            return dx;
+        }
+
+        function calculateVolumeTrend(volumes, prices, period = 13) {
+            const volumeMA = calculateMA(volumes, period);
+            if (!volumeMA) return 0;
+
+            const priceChange = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100;
+            let volumeScore = 0;
+
+            if (volumes[volumes.length - 1] > volumeMA) {
+                volumeScore = priceChange > 0 ? 1 : -1;
+            }
+
+            return volumeScore;
+        }
+
+        function calculateMomentumScore(closes, volumes) {
+            const rsi = calculateRSI(closes);
+            if (!rsi) return 0;
+
+            const volumeTrend = calculateVolumeTrend(volumes, closes);
+            const priceChange = ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100;
+
+            let score = 0;
+
+            // RSI component
+            if (rsi < 30) score += 2;
+            else if (rsi < 45) score += 1;
+            else if (rsi > 70) score -= 2;
+            else if (rsi > 55) score -= 1;
+
+            // Volume trend component
+            score += volumeTrend;
+
+            // Price change component
+            if (priceChange > 5) score += 2;
+            else if (priceChange > 2) score += 1;
+            else if (priceChange < -5) score -= 2;
+            else if (priceChange < -2) score -= 1;
+
+            return score;
+        }
+
+        function analyzeMarketStructure(klines) {
+            const closes = klines.map(k => parseFloat(k[4]));
+            const highs = klines.map(k => parseFloat(k[2]));
+            const lows = klines.map(k => parseFloat(k[3]));
+
+            const ma20 = calculateMA(closes, 20);
+            const ma50 = calculateMA(closes, 50);
+            const ma200 = calculateMA(closes, 200);
+            if (!ma20 || !ma50 || !ma200) return 0;
+
+            const currentPrice = closes[closes.length - 1];
+            let structureScore = 0;
+
+            // Trend alignment
+            if (currentPrice > ma20 && ma20 > ma50 && ma50 > ma200) structureScore += 3;
+            else if (currentPrice > ma20 && ma20 > ma50) structureScore += 2;
+            else if (currentPrice > ma20) structureScore += 1;
+
+            // ADX for trend strength
+            const adx = calculateADX(highs, lows, closes);
+            if (adx && adx > 25) structureScore += 1;
+            if (adx && adx > 35) structureScore += 1;
+
+            return structureScore;
+        }
+
+        function detectCandlePatterns(klines) {
+            if (klines.length < 30) return 'Insufficient Data';
+
+            const lastCandles = klines.slice(-3);
+
+            // Check for Three White Soldiers pattern
+            const allBullish = lastCandles.every(candle =>
+                parseFloat(candle[4]) > parseFloat(candle[1])
+            );
+
+            const increasingCloses = lastCandles.every((candle, i) =>
+                i === 0 || parseFloat(candle[4]) > parseFloat(lastCandles[i-1][4])
+            );
+
+            if (allBullish && increasingCloses) {
+                return 'Three White Soldiers';
+            }
+
+            return 'No Pattern';
+        }
+
+        function calculateCrossStatus(ma7, ma50, prevMa7, prevMa50) {
+            if (!ma7 || !ma50 || !prevMa7 || !prevMa50) return 'No Cross';
+            if (prevMa7 < prevMa50 && ma7 > ma50) return 'Golden Cross';
+            if (prevMa7 > prevMa50 && ma7 < ma50) return 'Death Cross';
+            return 'No Cross';
+        }
+
+        function calculateBollingerBands(closes, period = 20, multiplier = 2) {
+            if (closes.length < period) return { upper: null, middle: null, lower: null };
+
+            const ma = calculateMA(closes, period);
+            if (!ma) return { upper: null, middle: null, lower: null };
+
+            const variance = closes.slice(-period).reduce((sum, price) => {
+                return sum + Math.pow(price - ma, 2);
+            }, 0) / period;
+            const stdDev = Math.sqrt(variance);
+
+            return {
+                upper: ma + (multiplier * stdDev),
+                middle: ma,
+                lower: ma - (multiplier * stdDev)
+            };
+        }
+
+        function calculateOverallScore(crypto) {
+            if (!crypto.momentumScore || !crypto.volumeScore || !crypto.structureScore || !crypto.adx) {
+                return 0;
+            }
+
+            const momentumScore = crypto.momentumScore;
+            const volumeScore = crypto.volumeScore;
+            const structureScore = crypto.structureScore;
+            const trendStrength = crypto.adx > 25 ? 2 : crypto.adx > 20 ? 1 : 0;
+
+            return (momentumScore * 0.3) +
+                   (volumeScore * 0.2) +
+                   (structureScore * 0.3) +
+                   (trendStrength * 0.2);
+        }
+
+        // Signal categorization
+        function categorizePair(crypto) {
+            const overallScore = calculateOverallScore(crypto);
+            const hasStrongVolume = crypto.volumeScore > 0;
+            const hasStrongTrend = crypto.adx > 25;
+            const hasConfirmation = crypto.pattern === 'Three White Soldiers' ||
+                                  crypto.crossStatus === 'Golden Cross';
+
+            if (overallScore >= 3 && hasStrongVolume && hasStrongTrend && hasConfirmation) {
+                return 'GOLD';
+            } else if (overallScore >= 2 && (hasStrongVolume || hasStrongTrend)) {
+                return 'SILVER';
+            } else if (overallScore >= 1) {
+                return 'BRONZE';
+            }
+            return null;
+        }
+
+        async function analyzeKlines(klines) {
+            const closes = klines.map(k => parseFloat(k[4]));
+            const highs = klines.map(k => parseFloat(k[2]));
+            const lows = klines.map(k => parseFloat(k[3]));
+            const volumes = klines.map(k => parseFloat(k[5]));
+
+            const currentPrice = closes[closes.length - 1];
+            const priceChange = ((currentPrice - closes[closes.length - 25]) / closes[closes.length - 25]) * 100;
+
+            // Calculate technical indicators
+            const rsi = calculateRSI(closes);
+            const adx = calculateADX(highs, lows, closes);
+            const volumeScore = calculateVolumeTrend(volumes, closes);
+            const momentumScore = calculateMomentumScore(closes, volumes);
+            const structureScore = analyzeMarketStructure(klines);
+
+            // Calculate moving averages for cross detection
+            const ma7 = calculateMA(closes, 7);
+            const ma50 = calculateMA(closes, 50);
+            const prevMa7 = calculateMA(closes.slice(0, -1), 7);
+            const prevMa50 = calculateMA(closes.slice(0, -1), 50);
+
+            // Generate signals array
+            const signals = [];
+            if (rsi !== null) {
+                if (rsi < 30) signals.push('Oversold');
+                if (rsi > 70) signals.push('Overbought');
+            }
+            if (adx !== null && adx > 25) signals.push('Strong Trend');
+
+            if (volumeScore > 0) signals.push('Volume Confirmation');
+
+            const pattern = detectCandlePatterns(klines);
+            if (pattern !== 'No Pattern') signals.push(pattern);
+
+            const crossStatus = calculateCrossStatus(ma7, ma50, prevMa7, prevMa50);
+            if (crossStatus !== 'No Cross') signals.push(crossStatus);
+
+            return {
+                currentPrice,
+                priceChange,
+                rsi,
+                adx,
+                volumeScore,
+                momentumScore,
+                structureScore,
+                signals,
+                pattern,
+                crossStatus
+            };
+        }
+
+        // API Functions
+        async function fetchTradingPairs() {
+            try {
+                const response = await fetch(`${API_URL}/exchangeInfo`);
+                const data = await response.json();
+                return data.symbols
+                    .filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT')
+                    .map(s => s.symbol);
+            } catch (error) {
+                console.error('Error fetching trading pairs:', error);
+                return [];
+            }
+        }
+
+        async function fetchKlines(symbol, interval = '1h', limit = 200) {
+            try {
+                const response = await fetch(`${API_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching klines for ${symbol}:`, error);
+                return [];
+            }
+        }
+
+        // UI Update Functions
+        function updateUI(filter = 'all') {
+            const tableBody = document.getElementById('signalTableBody');
+            tableBody.innerHTML = '';
+
+            let goldCount = 0, silverCount = 0, bronzeCount = 0;
+
+            // Sort data by overall score
+            const sortedData = Array.from(cryptoData.entries()).sort((a, b) => {
+                return calculateOverallScore(b[1]) - calculateOverallScore(a[1]);
+            });
+
+            sortedData.forEach(([pair, crypto]) => {
+                const medal = categorizePair(crypto);
+                if (!medal) return;
+
+                // Update counts
+                if (medal === 'GOLD') goldCount++;
+                if (medal === 'SILVER') silverCount++;
+                if (medal === 'BRONZE') bronzeCount++;
+
+                // Apply filter
+                if (filter !== 'all' && medal !== filter) return;
+
+                const row = `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                ${medal === 'GOLD' ? 'bg-yellow-100 text-yellow-800' :
+                                  medal === 'SILVER' ? 'bg-gray-100 text-gray-800' :
+                                  'bg-orange-100 text-orange-800'}">
+                                ${medal}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">${pair}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.currentPrice.toFixed(8)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap ${crypto.priceChange > 0 ? 'text-green-600' : 'text-red-600'}">
+                            ${crypto.priceChange.toFixed(2)}%
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.volumeScore.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.structureScore.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">${crypto.momentumScore.toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap font-bold">${calculateOverallScore(crypto).toFixed(2)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            ${crypto.signals.join(', ')}
+                        </td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+
+            // Update counts
+            document.getElementById('goldCount').textContent = goldCount;
+            document.getElementById('silverCount').textContent = silverCount;
+            document.getElementById('bronzeCount').textContent = bronzeCount;
+
+            updateCategoryDetails(filter);
+        }
+
+        function updateCategoryDetails(filter) {
+            const categoryDetails = document.getElementById('categoryDetails');
+            const analyticsSummary = document.getElementById('analyticsSummary');
+
+            if (filter === 'all') {
+                analyticsSummary.classList.add('hidden');
+                return;
+            }
+
+            const details = {
+                'GOLD': {
+                    requirements: '• Overall Score >= 3\n• Strong Volume\n• Strong Trend (ADX > 25)\n• Pattern/Cross Confirmation',
+                    description: 'High-probability setups with multiple confirmations'
+                },
+                'SILVER': {
+                    requirements: '• Overall Score >= 2\n• Strong Volume or Strong Trend\n• At least one confirmation signal',
+                    description: 'Emerging opportunities with partial confirmation'
+                },
+                'BRONZE': {
+                    requirements: '• Overall Score >= 1\n• Early technical signals',
+                    description: 'Early signals requiring additional confirmation'
+                }
+            };
+
+            const selectedDetails = details[filter];
+            if (selectedDetails) {
+                categoryDetails.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <h4 class="font-bold mb-2">Requirements:</h4>
+                            <pre class="whitespace-pre-wrap">${selectedDetails.requirements}</pre>
+                        </div>
+                        <div>
+                            <h4 class="font-bold mb-2">Description:</h4>
+                            <p>${selectedDetails.description}</p>
+                        </div>
+                    </div>
+                `;
+                analyticsSummary.classList.remove('hidden');
+            }
+        }
+
+        // Initialize loading data
+        async function loadInitialData(interval = '1h') {
+            try {
+                toggleLoading(true);
+                const pairs = await fetchTradingPairs();
+                cryptoData.clear();
+
+                const totalPairs = Math.min(pairs.length, 300);
+                let processedPairs = 0;
+
+                for (const pair of pairs.slice(0, totalPairs)) {
+                    try {
+                        const klines = await fetchKlines(pair, interval);
+                        if (klines.length < 200) continue;
+
+                        const analysis = await analyzeKlines(klines);
+                        cryptoData.set(pair, analysis);
+
+                        processedPairs++;
+                        updateLoadingProgress(processedPairs, totalPairs);
+                    } catch (error) {
+                        console.error(`Error processing ${pair}:`, error);
+                    }
+                }
+
+                updateUI(currentFilter);
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('goldCategory').addEventListener('click', () => {
+            currentFilter = currentFilter === 'GOLD' ? 'all' : 'GOLD';
+            updateUI(currentFilter);
+        });
+
+        document.getElementById('silverCategory').addEventListener('click', () => {
+            currentFilter = currentFilter === 'SILVER' ? 'all' : 'SILVER';
+            updateUI(currentFilter);
+        });
+
+        document.getElementById('bronzeCategory').addEventListener('click', () => {
+            currentFilter = currentFilter === 'BRONZE' ? 'all' : 'BRONZE';
+            updateUI(currentFilter);
+        });
+
+        document.getElementById('sortBy').addEventListener('change', function(e) {
+            const sortValue = e.target.value;
+            const sortedData = Array.from(cryptoData.entries()).sort((a, b) => {
+                switch(sortValue) {
+                    case 'score':
+                        return calculateOverallScore(b[1]) - calculateOverallScore(a[1]);
+                    case 'volume':
+                        return b[1].volumeScore - a[1].volumeScore;
+                    case 'volatility':
+                        return Math.abs(b[1].priceChange) - Math.abs(a[1].priceChange);
+                    case 'momentum':
+                        return b[1].momentumScore - a[1].momentumScore;
+                    default:
+                        return 0;
+                }
+            });
+
+            cryptoData = new Map(sortedData);
+            updateUI(currentFilter);
+        });
+
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#signalTableBody tr');
+
+            rows.forEach(row => {
+                const pair = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
+                row.style.display = pair.includes(searchTerm) ? '' : 'none';
+            });
+        });
+
+        document.getElementById('intervalSelect').addEventListener('change', function(e) {
+            loadInitialData(e.target.value);
+        });
+
+        document.getElementById('refreshButton').addEventListener('click', function() {
+            const interval = document.getElementById('intervalSelect').value;
+            loadInitialData(interval);
+        });
+
+        // Initialize on page load
+        window.onload = () => {
+            loadInitialData();
+        };
+    </script>
+</body>
+</html>
+            if (
