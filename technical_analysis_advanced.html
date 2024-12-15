@@ -149,7 +149,7 @@
 
         if (currentPriceCell && gainCell) {
           currentPriceCell.textContent = currentPrice.toFixed(5);
-          gainCell.textContent = gainPercentage.toFixed(2) ;
+          gainCell.textContent = gainPercentage.toFixed(2);
 
           // Add color coding for gains/losses
           gainCell.className = 'p-2 gain-percentage ' +
@@ -384,7 +384,7 @@
               <td class="p-2">${ma200?.toFixed(5) || '-'}</td>
               <td class="p-2">${currentPrice.toFixed(5)}</td>
               <td class="p-2 current-price">${currentPrice.toFixed(5)}</td>
-              <td class="p-2 gain-percentage">0.00%</td>
+              <td class="p-2 gain-percentage">0.00</td>
               <td class="p-2">${crossStatus}</td>
               <td class="p-2 ${pattern.includes('Bullish') ? 'text-green-600' : pattern.includes('Bearish') ? 'text-red-600' : ''}">${pattern}</td>
               <td class="p-2">${upper?.toFixed(5) || '-'}</td>
