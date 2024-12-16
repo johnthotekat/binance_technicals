@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Drop Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">Crypto Drop Scanner</h1>
+
+        <!-- Controls -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 bg-white p-4 rounded-lg shadow">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Lookback Period (Days)</label>
+                <select id="lookbackDays" class="w-full border rounded-md p-2">
+                    <option value="7">7 Days</option>
+                    <option value="14">14 Days</option>
+                    <option value="30" selected>30 Days</option>
+                    <option value="60">60 Days</option>
+                    <option value="90">90 Days</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Drop %</label>
+                <input type="number" id="minDrop" value="20" min="5" max="90"
+                       class="w-full border rounded-md p-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Maximum Rebound %</label>
+                <input type="number" id="maxRebound" value="50" min="5" max="90"
+                       class="w-full border rounded-md p-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Filter by Suggestion</label>
+                <select id="suggestionFilter" class="w-full border rounded-md p-2">
+                    <option value="">All Suggestions</option>
+                    <option value="Strong Buy">Strong Buy</option>
+                    <option value="Consider Buy">Consider Buy</option>
+                    <option value="Wait">Wait</option>
+                    <option value="Monitor">Monitor</option>
+                </select>
+            </div>
+            <div class="flex items-end">
+                <button id="scanButton"
+                        class="w-full bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">
+                    Scan Market
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loadingIndicator" class="hidden">
+            <div class="flex items-center justify-center space-x-2 mb-4">
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+                <span class="text-gray-600">Scanning... <span id="progress">0/0</span></span>
+            </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="p-4 border-b">
+                <input type="text" id="filterInput" placeholder="Filter results..."
+                       class="w-full border rounded-md p-2">
+            </div>
+            <div class="overflow-x-auto">
+                <table id="resultsTable" class="min-w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(0)">Symbol</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(1)">High Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(2)">High Price</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(3)">Low Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(4)">Low Price</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(5)">Drop %</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(6)">Current Price</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(7)">Rebound %</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable(8)">Volume Change %</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer">Score</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer">Suggestion</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="resultsBody">
+                        <!-- Results will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://api.binance.com/api/v3';
+        let lastResults = []; // Store results for filtering
+
+        // Fetch all USDT trading pairs
+        async function fetchTradingPairs() {
+            const response = await fetch(`${API_URL}/exchangeInfo`);
+            const data = await response.json();
+            return data.symbols
+                .filter(symbol => symbol.status === 'TRADING' && symbol.quoteAsset === 'USDT')
+                .map(s => s.symbol);
+        }
+
+        // Fetch historical klines (candlestick data)
+        async function fetchKlines(symbol, lookbackDays) {
+            const endTime = Date.now();
+            const startTime = endTime - (lookbackDays * 24 * 60 * 60 * 1000);
+
+            try {
+                const response = await fetch(
+                    `${API_URL}/klines?symbol=${symbol}&interval=1d&startTime=${startTime}&endTime=${endTime}`
+                );
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching klines for ${symbol}:`, error);
+                return null;
+            }
+        }
+
+        // Calculate trading score
+        function calculateScore(result) {
+            let score = 0;
+
+            // Drop percentage scoring
+            if (result.dropPercent > 50) score += 30;
+            else if (result.dropPercent > 30) score += 20;
+            else score += 10;
+
+            // Rebound scoring (lower is better)
+            if (result.reboundPercent < 10) score += 30;
+            else if (result.reboundPercent < 20) score += 20;
+            else if (result.reboundPercent < 30) score += 10;
+
+            // Volume change scoring
+            if (result.volumeChange > 50) score += 40;
+            else if (result.volumeChange > 20) score += 30;
+            else if (result.volumeChange > 0) score += 20;
+
+            return score;
+        }
+
+        // Analyze price action for a symbol
+        function analyzePriceAction(klines, minDrop, maxRebound) {
+            if (!klines || klines.length < 2) return null;
+
+            const prices = klines.map(k => ({
+                timestamp: new Date(k[0]),
+                high: parseFloat(k[2]),
+                low: parseFloat(k[3]),
+                close: parseFloat(k[4]),
+                volume: parseFloat(k[5])
+            }));
+
+            // Find highest price and its date
+            const highestPrice = Math.max(...prices.map(p => p.high));
+            const highestPriceIndex = prices.findIndex(p => p.high === highestPrice);
+            const highDate = prices[highestPriceIndex].timestamp;
+
+            // Find lowest price after the high
+            const pricesAfterHigh = prices.slice(highestPriceIndex + 1);
+            if (pricesAfterHigh.length === 0) return null;
+
+            const lowestPrice = Math.min(...pricesAfterHigh.map(p => p.low));
+            const lowestPriceIndex = pricesAfterHigh.findIndex(p => p.low === lowestPrice);
+            const lowDate = pricesAfterHigh[lowestPriceIndex].timestamp;
+
+            // Calculate drop and rebound percentages
+            const currentPrice = prices[prices.length - 1].close;
+            const dropPercent = ((highestPrice - lowestPrice) / highestPrice) * 100;
+            const reboundPercent = ((currentPrice - lowestPrice) / lowestPrice) * 100;
+
+            // Calculate volume change
+            const recentVolumes = prices.slice(-7);
+            const previousVolumes = prices.slice(-14, -7);
+            const avgRecentVolume = recentVolumes.reduce((sum, p) => sum + p.volume, 0) / 7;
+            const avgPreviousVolume = previousVolumes.reduce((sum, p) => sum + p.volume, 0) / 7;
+            const volumeChange = ((avgRecentVolume - avgPreviousVolume) / avgPreviousVolume) * 100;
+
+            // Check if pattern matches criteria
+            if (dropPercent >= minDrop && reboundPercent <= maxRebound) {
+                return {
+                    highDate,
+                    highPrice: highestPrice,
+                    lowDate,
+                    lowPrice: lowestPrice,
+                    dropPercent,
+                    currentPrice,
+                    reboundPercent,
+                    volumeChange
+                };
+            }
+
+            return null;
+        }
+
+        // Generate trading suggestion based on metrics
+        function generateSuggestion(result) {
+            const { dropPercent, reboundPercent, volumeChange } = result;
+            const score = calculateScore(result);
+
+            // Strong buy conditions
+            if (score >= 80) {
+                return {
+                    text: 'Strong Buy - Major drop with volume support',
+                    color: 'text-green-600 font-semibold',
+                    score
+                };
+            }
+
+            // Potential buy conditions
+            if (score >= 60) {
+                return {
+                    text: 'Consider Buy - Watch for confirmation',
+                    color: 'text-blue-600',
+                    score
+                };
+            }
+
+            // Wait conditions
+            if (reboundPercent > 40) {
+                return {
+                    text: 'Wait - Missed early entry',
+                    color: 'text-yellow-600',
+                    score
+                };
+            }
+
+            if (volumeChange < -20) {
+                return {
+                    text: 'Wait - Low volume',
+                    color: 'text-yellow-600',
+                    score
+                };
+            }
+
+            // Default suggestion
+            return {
+                text: 'Monitor - Need more signals',
+                color: 'text-gray-600',
+                score
+            };
+        }
+
+        // Add result to the table
+        function addResultToTable(symbol, result) {
+            const suggestion = generateSuggestion(result);
+            result.score = suggestion.score;
+            result.suggestionText = suggestion.text;
+
+            const row = document.createElement('tr');
+            const score = suggestion.score;
+
+            // Add background color based on score
+            if (score >= 80) {
+                row.className = 'bg-green-50 hover:bg-green-100';
+            } else if (score >= 60) {
+                row.className = 'bg-blue-50 hover:bg-blue-100';
+            } else {
+                row.className = 'hover:bg-gray-50';
+            }
+
+            const formatDate = (date) => date.toISOString().split('T')[0];
+            const formatNumber = (num, decimals = 2) => num.toFixed(decimals);
+
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap">${symbol}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${formatDate(result.highDate)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.highPrice, 4)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${formatDate(result.lowDate)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.lowPrice, 4)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-red-600">-${formatNumber(result.dropPercent)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.currentPrice, 4)}</td>
+                <td class="px-6 py-4 whitespace-nowrap ${result.reboundPercent < 20 ? 'text-green-600' : ''}">${formatNumber(result.reboundPercent)}</td>
+                <td class="px-6 py-4 whitespace-nowrap ${result.volumeChange > 0 ? 'text-green-600' : 'text-red-600'}">${formatNumber(result.volumeChange)}</td>
+                <td class="px-6 py-4 whitespace-nowrap font-semibold">${score}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="${suggestion.color}">${suggestion.text}</span>
+                </td>
+            `;
+
+            document.getElementById('resultsBody').appendChild(row);
+        }
+
+        // Filter table results
+        function filterTable() {
+            const textFilter = document.getElementById('filterInput').value.toLowerCase();
+            const suggestionFilter = document.getElementById('suggestionFilter').value;
+            const rows = document.querySelectorAll('#resultsBody tr');
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                const suggestion = row.querySelector('td:last-child').textContent;
+                const matchesText = text.includes(textFilter);
+                const matchesSuggestion = !suggestionFilter || suggestion.includes(suggestionFilter);
+                row.style.display = matchesText && matchesSuggestion ? '' : 'none';
+            });
+        }
+
+        // Sort table function
+        function sortTable(columnIndex) {
+            const tbody = document.getElementById('resultsBody');
+            const rows = Array.from(tbody.getElementsByTagName('tr'));
+
+            rows.sort((rowA, rowB) => {
+                const cellA = rowA.cells[columnIndex].textContent.trim();
+                const cellB = rowB.cells[columnIndex].textContent.trim();
+
+                // Check if the content is a number (including percentages and negative numbers)
+                const numA = parseFloat(cellA.replace(/[%\-]/g, ''));
+                const numB = parseFloat(cellB.replace(/[%\-]/g, ''));
+
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return numA - numB;
+                }
+
+                // Handle dates
+                const dateA = new Date(cellA);
+                const dateB = new Date(cellB);
+                if (dateA instanceof Date && !isNaN(dateA) && dateB instanceof Date && !isNaN(dateB)) {
+                    return dateA - dateB;
+                }
+
+                // Default to string comparison
+                return cellA.localeCompare(cellB);
+            });
+
+            // Remove existing rows
+            while (tbody.firstChild) {
+                tbody.removeChild(tbody.firstChild);
+            }
+
+            // Add sorted rows
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Main scanning function
+        async function scanMarket() {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const progressSpan = document.getElementById('progress');
+            const tbody = document.getElementById('resultsBody');
+            const lookbackDays = parseInt(document.getElementById('lookbackDays').value);
+            const minDrop = parseFloat(document.getElementById('minDrop').value);
+            const maxRebound = parseFloat(document.getElementById('maxRebound').value);
+
+            loadingIndicator.classList.remove('hidden');
+            tbody.innerHTML = '';
+            lastResults = [];
+
+            try {
+                const pairs = await fetchTradingPairs();
+                progressSpan.textContent = `0/${pairs.length}`;
+
+                let processed = 0;
+                for (const pair of pairs) {
+                    const klines = await fetchKlines(pair, lookbackDays);
+                    if (klines) {
+                        const result = analyzePriceAction(klines, minDrop, maxRebound);
+                        if (result) {
+                            addResultToTable(pair, result);
+                            lastResults.push({ symbol: pair, ...result });
+                        }
+                    }
+                    processed++;
+                    progressSpan.textContent = `${processed}/${pairs.length}`;
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Rate limiting
+                }
+            } catch (error) {
+                console.error('Error scanning markets:', error);
+                alert('Error scanning markets. Please try again.');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        // Event listeners
+        document.getElementById('scanButton').addEventListener('click', scanMarket);
+        document.getElementById('filterInput').addEventListener('input', filterTable);
+        document.getElementById('suggestionFilter').addEventListener('change', filterTable);
+
+        // Initialize first scan
+        scanMarket();
+    </script>
+</body>
+</html>
