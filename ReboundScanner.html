@@ -178,10 +178,10 @@
                 <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.highPrice, 4)}</td>
                 <td class="px-6 py-4 whitespace-nowrap">${formatDate(result.lowDate)}</td>
                 <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.lowPrice, 4)}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-red-600">-${formatNumber(result.dropPercent)}%</td>
+                <td class="px-6 py-4 whitespace-nowrap text-red-600">-${formatNumber(result.dropPercent)}</td>
                 <td class="px-6 py-4 whitespace-nowrap">${formatNumber(result.currentPrice, 4)}</td>
-                <td class="px-6 py-4 whitespace-nowrap ${result.reboundPercent < 20 ? 'text-green-600' : ''}">${formatNumber(result.reboundPercent)}%</td>
-                <td class="px-6 py-4 whitespace-nowrap ${result.volumeChange > 0 ? 'text-green-600' : 'text-red-600'}">${formatNumber(result.volumeChange)}%</td>
+                <td class="px-6 py-4 whitespace-nowrap ${result.reboundPercent < 20 ? 'text-green-600' : ''}">${formatNumber(result.reboundPercent)}</td>
+                <td class="px-6 py-4 whitespace-nowrap ${result.volumeChange > 0 ? 'text-green-600' : 'text-red-600'}">${formatNumber(result.volumeChange)}</td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <span class="${suggestion.color}">${suggestion.text}</span>
                 </td>
